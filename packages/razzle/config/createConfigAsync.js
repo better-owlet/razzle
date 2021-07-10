@@ -14,7 +14,7 @@ const getClientEnv = require('./env').getClientEnv;
 const ReactRefreshWebpackPlugin = require('@pmmmwh/react-refresh-webpack-plugin');
 const errorOverlayMiddleware = require('react-dev-utils/errorOverlayMiddleware');
 const WebpackBar = require('webpackbar');
-const ManifestPlugin = require('webpack-manifest-plugin');
+const ManifestPlugin = require('webpack-manifest-plugin').WebpackManifestPlugin;
 const CopyPlugin = require('copy-webpack-plugin');
 const PnpWebpackPlugin = require('pnp-webpack-plugin');
 const modules = require('./modules');
@@ -101,6 +101,9 @@ module.exports = (
 
     const shouldUseReactRefresh =
       IS_WEB && IS_DEV && razzleOptions.enableReactRefresh ? true : false;
+
+    const shouldDisableWebpackbar =
+      razzleOptions.disableWebpackbar === true || razzleOptions.disableWebpackbar === target;
 
     let webpackOptions = {};
 
@@ -981,7 +984,7 @@ module.exports = (
       }
     }
 
-    if (IS_DEV) {
+    if (IS_DEV && !shouldDisableWebpackbar) {
       config.plugins = [
         ...config.plugins,
         new WebpackBar({
