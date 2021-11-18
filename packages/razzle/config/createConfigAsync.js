@@ -14,7 +14,7 @@ const getClientEnv = require('./env').getClientEnv;
 const ReactRefreshWebpackPlugin = require('@pmmmwh/react-refresh-webpack-plugin');
 const errorOverlayMiddleware = require('react-dev-utils/errorOverlayMiddleware');
 const WebpackBar = require('webpackbar');
-const ManifestPlugin = require('webpack-manifest-plugin');
+const ManifestPlugin = require('webpack-manifest-plugin').WebpackManifestPlugin;
 const CopyPlugin = require('copy-webpack-plugin');
 const PnpWebpackPlugin = require('pnp-webpack-plugin');
 const modules = require('./modules');
@@ -24,6 +24,7 @@ const logger = require('razzle-dev-utils/logger');
 const razzlePaths = require('./paths');
 const getCacheIdentifier = require('react-dev-utils/getCacheIdentifier');
 const webpackMajor = require('razzle-dev-utils/webpackMajor');
+const devServerMajorVersion = require('razzle-dev-utils/devServerMajor');
 
 const hasPostCssConfigTest = () => {
   try {
@@ -35,9 +36,12 @@ const hasPostCssConfigTest = () => {
 
 const hasPostCssConfig = hasPostCssConfigTest();
 
-const webpackDevClientEntry = require.resolve(
-  'razzle-dev-utils/webpackHotDevClient'
-);
+let webpackDevClientEntry;
+if (devServerMajorVersion > 3) {
+  webpackDevClientEntry = require.resolve('razzle-dev-utils/webpackHotDevClientV4');
+} else {
+  webpackDevClientEntry = require.resolve('razzle-dev-utils/webpackHotDevClient');
+}
 
 const isModuleCSS = module => {
   return (
@@ -78,6 +82,7 @@ module.exports = (
     const IS_SERVERLESS = /serverless/.test(razzleOptions.buildType);
     const IS_PROD = env === 'prod';
     const IS_DEV = env === 'dev';
+    const IS_DEV_ENV = process.env.NODE_ENV === 'development';
 
     // Contains various versions of the Webpack SplitChunksPlugin used in different build types
     const splitChunksConfigs = {
@@ -101,6 +106,9 @@ module.exports = (
 
     const shouldUseReactRefresh =
       IS_WEB && IS_DEV && razzleOptions.enableReactRefresh ? true : false;
+
+    const shouldDisableWebpackbar =
+      razzleOptions.disableWebpackbar === true || razzleOptions.disableWebpackbar === target;
 
     let webpackOptions = {};
 
@@ -462,13 +470,13 @@ module.exports = (
     // This is our base webpack config.
     let config = {
       // Set webpack mode:
-      mode: IS_DEV ? 'development' : 'production',
+      mode: IS_DEV || IS_DEV_ENV ? 'development' : 'production',
       // Set webpack context to the current apps directory
       context: paths.appPath,
       // Specify target (either 'node' or 'web')
       target: target,
       // Controversially, decide on sourcemaps.
-      devtool: IS_DEV ? 'cheap-module-source-map' : razzleOptions.enableSourceMaps ? 'source-map' : false,
+      devtool: IS_DEV || IS_DEV_ENV ? 'cheap-module-source-map' : razzleOptions.enableSourceMaps ? 'source-map' : false,
       // We need to tell webpack how to resolve both Razzle's node_modules and
       // the users', so we use resolve and resolveLoader.
       resolve: {
@@ -668,20 +676,24 @@ module.exports = (
         server: [paths.appServerIndexJs],
       };
 
+      // make sure the key exists
+      config.optimization = {};
+
       if (IS_PROD) {
         // Prevent creating multiple chunks for the server
         // in dev mode emitting one huge server file on every save is very slow
-
-        config.plugins.push(
-          new webpack.optimize.LimitChunkCountPlugin({
-            maxChunks: 1,
-          })
-        );
-        config.optimization = {
-          minimize: true,
-          minimizer: [
-            new TerserPlugin(webpackOptions.terserPluginOptions)
-          ],
+        if (!IS_DEV_ENV) {
+          config.plugins.push(
+            new webpack.optimize.LimitChunkCountPlugin({
+              maxChunks: 1,
+            })
+          );
+          config.optimization = {
+            minimize: true,
+            minimizer: [
+              new TerserPlugin(webpackOptions.terserPluginOptions)
+            ],
+          }
         }
         if (webpackMajor === 5) {
           config.optimization.emitOnErrors = razzleOptions.emitOnErrors;
@@ -828,9 +840,9 @@ module.exports = (
 
         // Configure webpack-dev-server to serve our client-side bundle from
         // http://${dotenv.raw.HOST}:3001
+        //
+        // First assign the dev server props that are common to v3 and v4
         config.devServer = {
-          disableHostCheck: true,
-          clientLogLevel: 'none', // Enable gzip compression of generated files.
           compress: true, // watchContentBase: true,
           headers: { 'Access-Control-Allow-Origin': '*' },
           historyApiFallback: {
@@ -838,29 +850,59 @@ module.exports = (
             // See https://github.com/facebookincubator/create-react-app/issues/387.
             disableDotRule: true,
           },
-          host: dotenv.raw.HOST,
-          publicPath: clientPublicPath,
           hot: true,
-          noInfo: true,
-          overlay: false,
+          host: dotenv.raw.HOST,
           port: devServerPort,
-          quiet: true, // By default files from `contentBase` will not trigger a page reload.
-          // Reportedly, this avoids CPU overload on some systems.
-          // https://github.com/facebookincubator/create-react-app/issues/293
-          watchOptions: { ignored: /node_modules/ },
-          before(app) {
-            // This lets us open files from the runtime error overlay.
-            app.use(errorOverlayMiddleware());
-          },
         };
+        // If the major version is > 3, then use the newer configuration notation
+        if (devServerMajorVersion > 3) {
+          // See https://github.com/webpack/webpack-dev-server/blob/master/migration-v4.md for how this was migrated
+          config.devServer = Object.assign(config.devServer, {
+            allowedHosts: 'all',
+            client: {
+              logging: 'none', // Enable gzip compression of generated files.
+              overlay: false,
+            },
+            devMiddleware: {
+              publicPath: clientPublicPath,
+            },
+            static: {
+              // Reportedly, this avoids CPU overload on some systems.
+              // https://github.com/facebookincubator/create-react-app/issues/293
+              watch: { ignored: /node_modules/ },
+            },
+            onBeforeSetupMiddleware(server) {
+              // This lets us open files from the runtime error overlay.
+              server.app.use(errorOverlayMiddleware());
+            },
+          });
+        } else {
+          config.devServer = Object.assign(config.devServer, {
+            disableHostCheck: true,
+            clientLogLevel: 'none', // Enable gzip compression of generated files.
+            publicPath: clientPublicPath,
+            noInfo: true,
+            overlay: false,
+            quiet: true, // By default files from `contentBase` will not trigger a page reload.
+            // Reportedly, this avoids CPU overload on some systems.
+            // https://github.com/facebookincubator/create-react-app/issues/293
+            watchOptions: { ignored: /node_modules/ },
+            before(app) {
+              // This lets us open files from the runtime error overlay.
+              app.use(errorOverlayMiddleware());
+            },
+          });
+        }
 
         // Add client-only development plugins
         config.plugins = [
           ...config.plugins,
-          new webpack.HotModuleReplacementPlugin({
-            // set this true will break HtmlWebpackPlugin
-            multiStep: !clientOnly,
-          }),
+          devServerMajorVersion > 3
+            ? null // avoid warning since v4 automatically adds the HRM plugin when `hot` is true
+            : new webpack.HotModuleReplacementPlugin({
+                // set this true will break HtmlWebpackPlugin
+                multiStep: !clientOnly,
+              }),
           shouldUseReactRefresh
             ? new ReactRefreshWebpackPlugin({
                 overlay: {
@@ -888,7 +930,7 @@ module.exports = (
         config.externals = clientExternals;
 
         // Specify the client output directory and paths. Notice that we have
-        // changed the publiPath to just '/' from http://localhost:3001. This is because
+        // changed the publicPath to just '/' from http://localhost:3001. This is because
         // we will only be using one port in production.
         config.output = {
           path: paths.appBuildPublic,
@@ -910,8 +952,8 @@ module.exports = (
           // Define production environment vars
           new webpack.DefinePlugin(webpackOptions.definePluginOptions),
           miniCssExtractPlugin,
-          webpackMajor === 5 ? null : new webpack.HashedModuleIdsPlugin(),
-          new webpack.optimize.AggressiveMergingPlugin(),
+          IS_DEV_ENV || webpackMajor === 5 ? null : new webpack.HashedModuleIdsPlugin(),
+          IS_DEV_ENV ? null : new webpack.optimize.AggressiveMergingPlugin(),
           hasPublicDir && new CopyPlugin({
             patterns: [
               {
@@ -926,37 +968,42 @@ module.exports = (
           }),
         ].filter(x => x);
 
-        config.optimization = {
-          splitChunks: webpackOptions.splitChunksConfig,
-          moduleIds: webpackMajor === 5 ? 'deterministic' : 'hashed',
-          minimize: true,
-          minimizer: [
-            new TerserPlugin(webpackOptions.terserPluginOptions),
-            new CssMinimizerPlugin({
-              sourceMap: razzleOptions.enableSourceMaps,
-              minimizerOptions: {
-                sourceMap: razzleOptions.enableSourceMaps
-              },
-              minify: async (data, inputMap, minimizerOptions) => {
-                // eslint-disable-next-line global-require
-                const CleanCSS = require('clean-css');
+        // make sure the key exists
+        config.optimization = {};
 
-                const [[filename, input]] = Object.entries(data);
-                const minifiedCss = await new CleanCSS({ sourceMap: minimizerOptions.sourceMap }).minify({
-                  [filename]: {
-                    styles: input,
-                    sourceMap: inputMap,
-                  },
-                });
+        if (!IS_DEV_ENV) {
+          config.optimization = {
+            splitChunks: webpackOptions.splitChunksConfig,
+            moduleIds: webpackMajor === 5 ? 'deterministic' : 'hashed',
+            minimize: true,
+            minimizer: [
+              new TerserPlugin(webpackOptions.terserPluginOptions),
+              new CssMinimizerPlugin({
+                sourceMap: razzleOptions.enableSourceMaps,
+                minimizerOptions: {
+                  sourceMap: razzleOptions.enableSourceMaps
+                },
+                minify: async (data, inputMap, minimizerOptions) => {
+                  // eslint-disable-next-line global-require
+                  const CleanCSS = require('clean-css');
 
-                return {
-                  css: minifiedCss.styles,
-                  map: minifiedCss.sourceMap ? minifiedCss.sourceMap.toJSON() : '',
-                  warnings: minifiedCss.warnings,
-                };
-              },
-            })
-          ],
+                  const [[filename, input]] = Object.entries(data);
+                  const minifiedCss = await new CleanCSS({ sourceMap: minimizerOptions.sourceMap }).minify({
+                    [filename]: {
+                      styles: input,
+                      sourceMap: inputMap,
+                    },
+                  });
+
+                  return {
+                    css: minifiedCss.styles,
+                    map: minifiedCss.sourceMap ? minifiedCss.sourceMap.toJSON() : '',
+                    warnings: minifiedCss.warnings,
+                  };
+                },
+              })
+            ],
+          }
         }
         if (webpackMajor === 5) {
           config.optimization.emitOnErrors = razzleOptions.emitOnErrors;
@@ -967,8 +1014,16 @@ module.exports = (
 
       if (clientOnly) {
         if (IS_DEV) {
-          config.devServer.contentBase = paths.appPublic;
-          config.devServer.watchContentBase = true;
+          if (devServerMajorVersion > 3) {
+            // See https://github.com/webpack/webpack-dev-server/blob/master/migration-v4.md for how this was migrated
+            config.devServer.static.directory = paths.appPublic;
+            if (!config.devServer.static.watch) {
+              config.devServer.static.watch = true;
+            }
+          } else {
+            config.devServer.contentBase = paths.appPublic;
+            config.devServer.watchContentBase = true;
+          }
         }
       }
 
@@ -981,7 +1036,7 @@ module.exports = (
       }
     }
 
-    if (IS_DEV) {
+    if (IS_DEV && !shouldDisableWebpackbar) {
       config.plugins = [
         ...config.plugins,
         new WebpackBar({

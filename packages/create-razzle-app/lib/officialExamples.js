@@ -9,9 +9,12 @@ module.exports = [
   "with-custom-target-babel-config",
   "with-custom-webpack-config",
   "with-devcert-https",
+  "with-development-build",
   "with-elm",
+  "with-esbuild-loader",
   "with-eslint",
   "with-experimental-refresh",
+  "with-fastify",
   "with-firebase-functions",
   "with-heroku",
   "with-hyperapp",
@@ -25,6 +28,7 @@ module.exports = [
   "with-material-ui",
   "with-mdx",
   "with-module-federation",
+  "with-monorepo-without-workspaces",
   "with-monorepo",
   "with-now-v2",
   "with-now",
@@ -48,5 +52,6 @@ module.exports = [
   "with-vendor-bundle",
   "with-vue-router",
   "with-vue",
+  "with-webpack-dev-server-v4",
   "with-webpack-public-path"
 ];
