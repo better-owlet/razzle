@@ -1,5 +1,6 @@
 module.exports = [
   "basic-server",
+  "basic-serverless",
   "basic-spa",
   "basic",
   "with-afterjs",
