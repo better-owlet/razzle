@@ -15,12 +15,27 @@ const setPorts = require('razzle-dev-utils/setPorts');
 const chalk = require('chalk');
 const terminate = require('terminate');
 
+let verbose = false;
+
 process.once('SIGINT', () => {
-  console.error(chalk.bgRedBright(' SIGINT '), chalk.redBright('exiting...'));
+  if (verbose) {
+    console.error(chalk.bgRedBright(' SIGINT '), chalk.redBright('exiting...'));
+  }
   terminate(process.pid, 'SIGINT', { timeout: 1000 }, () => {
-    console.error(chalk.bgGreen(' Goodbye '));
+    if (verbose) {
+      console.error(chalk.bgGreen(' Goodbye '));
+    }
     terminate(process.pid);
   });
+});
+
+// Makes the script crash on unhandled rejections instead of silently
+// ignoring them. In the future, promise rejections that are not handled will
+// terminate the Node.js process with a non-zero exit code.
+process.on('unhandledRejection', err => {
+  clearConsole();
+  logger.error('Unexpected error', err);
+  process.exit(1);
 });
 
 process.noDeprecation = true; // turns off that loadQuery clutter.
@@ -37,7 +52,7 @@ function main() {
     loadRazzleConfig(webpack)
       .then(
         async ({ razzle, razzleOptions, webpackObject, plugins, paths }) => {
-          const verbose = razzleOptions.verbose;
+          verbose = razzleOptions.verbose;
           if (!verbose) {
             process.removeAllListeners('warning');
           }
